@@ -30,7 +30,7 @@ python src/train_vae.py
 or 
 
 ```bash
-python train_vae.sh
+bash train_vae.sh
 ```
 
 remember to change the data path

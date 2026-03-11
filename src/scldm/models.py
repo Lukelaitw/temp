@@ -266,8 +266,8 @@ class VAE(BaseModel):
 
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         counts, genes = batch[ModelEnum.COUNTS.value], batch[ModelEnum.GENES.value]
-        counts_subset = batch.get(        self.log("train_loss", loss, prog_bar=False, on_step=True, on_epoch=True, sync_dist=True)
-e, None)
+        counts_subset = batch.get(ModelEnum.COUNTS_SUBSET.value, None)
+        genes_subset = batch.get(ModelEnum.GENES_SUBSET.value, None)
         library_size = batch[ModelEnum.LIBRARY_SIZE.value]
 
         mu, theta, _ = self.forward(
