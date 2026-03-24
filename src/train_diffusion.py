@@ -1,14 +1,5 @@
 import os
 import pathlib
-import warnings
-
-# 單機時 Lightning 仍會建議 sync_dist=True，但程式已全數使用，故過濾此提示
-warnings.filterwarnings(
-    "ignore",
-    message=".*sync_dist=True.*when logging on epoch level in distributed setting.*",
-    category=UserWarning,
-    module="pytorch_lightning.*",
-)
 
 import hydra
 import pytorch_lightning as pl
@@ -17,7 +8,7 @@ from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Trainer
 from pytorch_lightning.strategies import DDPStrategy
 
-from scldm._utils import setup_datamodule_and_steps
+from scldm._utils import load_validate_statedict_config, setup_datamodule_and_steps
 from scldm.logger import logger
 
 os.environ["HYDRA_FULL_ERROR"] = "1"
@@ -26,15 +17,6 @@ os.environ["HYDRA_FULL_ERROR"] = "1"
 def train(cfg: DictConfig) -> None:
     torch.set_float32_matmul_precision("high")
     pl.seed_everything(cfg.seed)
-
-    # Initialize distributed training
-    if not torch.distributed.is_initialized():
-        if "RANK" not in os.environ:
-            os.environ["RANK"] = "0"
-            os.environ["WORLD_SIZE"] = "1"
-            os.environ["MASTER_ADDR"] = "127.0.0.1"
-            os.environ["MASTER_PORT"] = "29500"
-        torch.distributed.init_process_group(backend="gloo")
 
     # Get world size from environment (set by torchrun/lightning)
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -46,15 +28,55 @@ def train(cfg: DictConfig) -> None:
     datamodule = setup_datamodule_and_steps(cfg, world_size, cfg.training.num_epochs)
     datamodule.setup()
 
-    # Scale learning rate by world size
+    # Scale learning rate by world size (for diffusion optimizer, not VAE)
     if world_size > 1:
-        original_lr = cfg.model.module.vae_optimizer.lr
-        cfg.model.module.vae_optimizer.lr = original_lr * world_size
-        logger.info(f"Scaled learning rate: {original_lr} -> {cfg.model.module.vae_optimizer.lr}")
+        if "diffusion_optimizer" in cfg.model.module:
+            original_lr = cfg.model.module.diffusion_optimizer.lr
+            cfg.model.module.diffusion_optimizer.lr = original_lr * world_size
+            logger.info(f"Scaled diffusion LR: {original_lr} -> {cfg.model.module.diffusion_optimizer.lr}")
+
+    # Check if using VAE as tokenizer (loading from checkpoint)
+    is_vae_as_tokenizer = (
+        hasattr(cfg.model.module, "vae_as_tokenizer") and "load_from_checkpoint" in cfg.model.module.vae_as_tokenizer
+    )
+
+    vae_state_dict = None
+    if is_vae_as_tokenizer:
+        ckpt_cfg = cfg.model.module.vae_as_tokenizer.load_from_checkpoint
+        job_path = pathlib.Path(f"{ckpt_cfg.ckpt_path}/{ckpt_cfg.job_name}")
+
+        # Determine checkpoint file
+        checkpoint_file = (
+            f"epoch={ckpt_cfg.epoch}.ckpt"
+            if ckpt_cfg.epoch is not None and isinstance(ckpt_cfg.epoch, int)
+            else "last.ckpt"
+        )
+
+        logger.info(f"Loading VAE checkpoint from: {job_path / checkpoint_file}")
+
+        # Load checkpoint and config
+        vae_checkpoints = torch.load(job_path / checkpoint_file, weights_only=False)
+        vae_config = OmegaConf.load(job_path / "config.yaml")
+
+        # Extract VAE state dict and update config
+        vae_state_dict, cfg = load_validate_statedict_config(vae_checkpoints, cfg, vae_config)
+        logger.info(f"Loaded VAE config from checkpoint, train mode: {cfg.model.module.vae_as_tokenizer.train}")
 
     # Instantiate model
     logger.info("Instantiating model...")
     module = hydra.utils.instantiate(cfg.model.module)
+
+    # Load VAE weights if using as tokenizer
+    if is_vae_as_tokenizer and vae_state_dict is not None:
+        module.vae_model.load_state_dict(vae_state_dict)
+        logger.info("VAE model weights loaded from checkpoint")
+
+        # Freeze VAE if not training
+        if not cfg.model.module.vae_as_tokenizer.train:
+            for param in module.vae_model.parameters():
+                param.requires_grad = False
+            module.vae_model.eval()
+            logger.info("VAE model frozen (train=false)")
 
     # Setup callbacks
     callbacks = []
@@ -67,8 +89,6 @@ def train(cfg: DictConfig) -> None:
     for lg_name, lg_cfg in cfg.training.logger.items():
         if lg_name == "wandb":
             if local_rank == 0:
-                # WandB logger config has _partial_=true, so instantiate returns a partial
-                # that we need to call to create the actual logger
                 wandb_partial = hydra.utils.instantiate(lg_cfg)
                 loggers.append(wandb_partial(id=None))
                 logger.info(f"Added logger: {lg_name}")
@@ -102,15 +122,12 @@ def train(cfg: DictConfig) -> None:
         logger.info(f"Resuming from checkpoint: {ckpt_path}")
 
     # Train
-    logger.info("Starting training...")
+    logger.info("Starting LDM training...")
     trainer.fit(module, datamodule=datamodule, ckpt_path=ckpt_path)
     logger.info("Training complete!")
 
 
-
-
-
-@hydra.main(config_path="../configs", config_name="vae_training", version_base="1.2")
+@hydra.main(config_path="../configs", config_name="ldm_training", version_base="1.2")
 def main(cfg: DictConfig) -> None:
     try:
         OmegaConf.register_new_resolver("eval", eval)

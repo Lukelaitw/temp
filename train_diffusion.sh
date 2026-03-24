@@ -1,0 +1,35 @@
+export WANDB_MODE=offline
+
+srun /gpfs/projects/p32572/Luke/.venv/bin/python src/train_diffusion.py \
+  paths.base_data_path=/projects/p32572/Luke/_artifacts/datasets \
+  paths.base_repo_path=/projects/p32572/Luke/ \
+  paths.base_release_path=/projects/p32572/Luke/_artifacts \
+  experiment_name=my_ldm_experiment \
+  seed=12345 \
+  model.module.vae_as_tokenizer.load_from_checkpoint.ckpt_path=/projects/p32572/Luke/outputs/checkpoints \
+  model.module.vae_as_tokenizer.load_from_checkpoint.job_name=my_vae_experiment \
+  model.module.diffusion_model.n_embed=512 \
+  model.module.diffusion_model.n_layer=12 \
+  model.module.diffusion_model.n_head=8 \
+  model.module.diffusion_model.condition_strategy=joint \
+  model.module.diffusion_optimizer.lr=1e-4 \
+  model.module.diffusion_scheduler.num_warmup_steps=11300 \
+  +model.module.diffusion_optimizer.betas=[0.9,0.95] \
+  +model.module.compile=true \
+  +model.module.compile_mode=reduce-overhead \
+  training.num_epochs=1000 \
+  training.trainer.max_steps=113000 \
+  training.trainer.enable_progress_bar=true \
+  training.trainer.check_val_every_n_epoch=5 \
+  training.callbacks.model_checkpoints.save_top_k=3 \
+  model.test_batch_size=128 \
+  datamodule.datamodule.val_as_test=false \
+  datamodule.dataset_params.dentate_gyrus.adata_attr=layers \
+  datamodule.dataset_params.dentate_gyrus.adata_key=X_counts \
+  +model.module.generation_args.timesteps=50 \
+  +model.module.eval_generation.enabled=true \
+  +model.module.eval_generation.freq=1 \
+  +model.module.eval_generation.warmup_epochs=0 \
+  +model.module.eval_generation.sample_size=500 \
+  datamodule.datamodule.train_adata_path=/scratch/zpt6685/Luke/scldm/_artifacts/datasets/dentategyrus_train.h5ad \
+  datamodule.datamodule.test_adata_path=/scratch/zpt6685/Luke/scldm/_artifacts/datasets/dentategyrus_test.h5ad \

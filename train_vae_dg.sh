@@ -10,5 +10,13 @@ srun /gpfs/projects/p32572/Luke/.venv/bin/python src/train_vae.py \
   paths.base_release_path=/projects/p32572/Luke/_artifacts \
   datamodule.dataset=dentate_gyrus \
   experiment_name=my_vae_experiment \
-  training.num_epochs=100 \
-  model.test_batch_size=128
+  training.trainer.max_steps=113000 \
+  training.num_epochs=1000 \
+  training.trainer.check_val_every_n_epoch=3 \
+  model.module.vae_scheduler.num_warmup_steps=11300 \
+  datamodule.datamodule.train_adata_path=/projects/p32572/Luke/_artifacts/datasets/dentategyrus_train.h5ad \
+  datamodule.datamodule.test_adata_path=/projects/p32572/Luke/_artifacts/datasets/dentategyrus_test.h5ad \
+  datamodule.dataset_params.dentate_gyrus.adata_attr=layers \
+  datamodule.dataset_params.dentate_gyrus.adata_key=X_counts \
+  model.test_batch_size=128 \
+  datamodule.datamodule.val_as_test=false \

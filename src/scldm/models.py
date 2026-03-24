@@ -58,14 +58,14 @@ REGRESSION_METRICS = {
 }
 
 MMD_METRICS = {
-    "mmd_braycurtis_counts": MMDLoss(kernel=BrayCurtisKernel()),
-    "mmd_tanimoto": MMDLoss(kernel=TanimotoKernel()),
-    "mmd_ruzicka_counts": MMDLoss(kernel=RuzickaKernel()),
+  #  "mmd_braycurtis_counts": MMDLoss(kernel=BrayCurtisKernel()),
+  #  "mmd_tanimoto": MMDLoss(kernel=TanimotoKernel()),
+  #  "mmd_ruzicka_counts": MMDLoss(kernel=RuzickaKernel()),
     "mmd_rbf": MMDLoss(kernel=RBFKernel()),
 }
 
 WASSERSTEIN_METRICS = {
-    "wasserstein1_sinkhorn": partial(wasserstein, method="sinkhorn", power=1),
+  #  "wasserstein1_sinkhorn": partial(wasserstein, method="sinkhorn", power=1),
     "wasserstein2_sinkhorn": partial(wasserstein, method="sinkhorn", power=2),
 }
 
@@ -668,7 +668,7 @@ class LatentDiffusion(BaseModel):
 
         loss_output = {"train_loss": loss_dict["loss"].mean()}
 
-        self.log("train_loss", loss_output["train_loss"], prog_bar=True, on_step=True, on_epoch=True, sync_dist=True)
+        self.log("train_loss", loss_output["train_loss"], prog_bar=False, on_step=True, on_epoch=True, sync_dist=True)
 
         if self.calculate_grad_norms:
             grad_norms = self._compute_gradient_norms({"diffusion": self.diffusion_model})
@@ -782,7 +782,7 @@ class LatentDiffusion(BaseModel):
         batch_size: int,
         genes: torch.Tensor,
         timesteps: int = 50,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # Validate inputs
         if len(genes) != batch_size:
             raise ValueError(f"genes batch dimension ({genes.shape[0]}) must match batch_size ({batch_size})")
@@ -839,8 +839,8 @@ class LatentDiffusion(BaseModel):
         counts = batch[ModelEnum.COUNTS.value]
         genes = batch[ModelEnum.GENES.value]
         library_size = batch[ModelEnum.LIBRARY_SIZE.value]
-        counts_subset = batch[ModelEnum.COUNTS_SUBSET.value]
-        genes_subset = batch[ModelEnum.GENES_SUBSET.value]
+        counts_subset = batch.get(ModelEnum.COUNTS_SUBSET.value)
+        genes_subset = batch.get(ModelEnum.GENES_SUBSET.value)
 
         mu, theta, z = self.vae_model.forward(
             counts=counts,
@@ -849,8 +849,11 @@ class LatentDiffusion(BaseModel):
             counts_subset=counts_subset,
             genes_subset=genes_subset,
         )
+        counts_pred = NegativeBinomialSCVI(mu=mu, theta=theta).sample()
         output: dict[str, torch.Tensor] = {
-            "z_mean_flat": z.flatten(start_dim=1),
+            "reconstructed_counts": counts_pred.cpu(),
+            "z": z.cpu(),
+            "z_mean_flat": z.flatten(start_dim=1).cpu(),
         }
         return output
 
@@ -882,14 +885,16 @@ class LatentDiffusion(BaseModel):
                 timesteps = self.generation_args.get("timesteps", 50)
                 genes = batch[ModelEnum.GENES.value]
                 logger.info("Generating samples.")
-                outputs = self.sample(
+                counts_generated, _ = self.sample(
                     condition=None,
                     guidance_weight=None,
                     batch_size=len(batch[ModelEnum.COUNTS.value]),
                     genes=genes,
                     timesteps=timesteps,
                 )
-                batch[f"{ModelEnum.COUNTS.value}_generated"] = outputs
+                bs = len(batch[ModelEnum.COUNTS.value])
+                batch[f"{ModelEnum.COUNTS.value}_generated_unconditional"] = counts_generated[:bs]
+                batch[f"{ModelEnum.COUNTS.value}_generated_conditional"] = counts_generated[bs:]
                 self.accumulated_generated_batches.append(tree_map(lambda x: x.cpu(), batch))
                 self.accumulated_samples += len(batch[ModelEnum.COUNTS.value])
 
@@ -898,44 +903,53 @@ class LatentDiffusion(BaseModel):
         if self.is_generation_eval_epoch and len(self.accumulated_generated_batches) > 0:
             # Concatenate all accumulated batches
             counts = torch.cat([b[ModelEnum.COUNTS.value] for b in self.accumulated_generated_batches], dim=0)
-            counts_generated = torch.cat(
-                [b[f"{ModelEnum.COUNTS.value}_generated"] for b in self.accumulated_generated_batches], dim=0
+            counts_gen_u = torch.cat(
+                [b[f"{ModelEnum.COUNTS.value}_generated_unconditional"] for b in self.accumulated_generated_batches],
+                dim=0,
+            )
+            counts_gen_c = torch.cat(
+                [b[f"{ModelEnum.COUNTS.value}_generated_conditional"] for b in self.accumulated_generated_batches],
+                dim=0,
             )
             library_size = torch.cat(
                 [b[ModelEnum.LIBRARY_SIZE.value] for b in self.accumulated_generated_batches], dim=0
             )
-            counts_generated_scaled = torch.log1p((counts_generated / library_size) * 10_000)
             counts_true_scaled = torch.log1p((counts / library_size) * 10_000)
             logger.info("Computing generation evaluation metrics.")
-            for k, fn in self.mmd_metric_fns.items():
-                if "counts" in k:
-                    mmd = fn(counts_true_scaled, counts_generated_scaled)
-                else:
-                    mmd = fn(counts, counts_generated)
-                self.log(
-                    f"generation_eval/{k}",
-                    torch.nanmean(mmd) if "counts" in k else torch.nanmean(mmd),
-                    on_epoch=True,
-                    sync_dist=True,
-                )
-            for k, fn in self.wasserstein_metric_fns.items():
-                wdist = fn(counts_true_scaled, counts_generated_scaled)
-                self.log(
-                    f"generation_eval/{k}",
-                    wdist,
-                    on_epoch=True,
-                    sync_dist=True,
-                )
-            for k, fn in self.r2_metric_fns.items():
-                r2 = fn(counts_true_scaled, counts_generated_scaled)
-                self.log(
-                    f"generation_eval/{k}",
-                    r2,
-                    on_epoch=True,
-                    sync_dist=True,
-                )
+            for branch, counts_generated in (
+                ("unconditional", counts_gen_u),
+                ("conditional", counts_gen_c),
+            ):
+                counts_generated_scaled = torch.log1p((counts_generated / library_size) * 10_000)
+                for k, fn in self.mmd_metric_fns.items():
+                    if "counts" in k:
+                        mmd = fn(counts_true_scaled, counts_generated_scaled)
+                    else:
+                        mmd = fn(counts, counts_generated)
+                    self.log(
+                        f"generation_eval/{k}_{branch}",
+                        torch.nanmean(mmd),
+                        on_epoch=True,
+                        sync_dist=True,
+                    )
+                for k, fn in self.wasserstein_metric_fns.items():
+                    wdist = fn(counts_true_scaled, counts_generated_scaled)
+                    self.log(
+                        f"generation_eval/{k}_{branch}",
+                        wdist,
+                        on_epoch=True,
+                        sync_dist=True,
+                    )
+            #    for k, fn in self.r2_metric_fns.items():
+            #        r2 = fn(counts_true_scaled, counts_generated_scaled)
+            #        self.log(
+            #            f"generation_eval/{k}_{branch}",
+            #            r2,
+            #            on_epoch=True,
+            #            sync_dist=True,
+            #        )
 
-            self.log("generation_eval/total_samples", counts.shape[0], on_epoch=True, sync_dist=True)
+            #self.log("generation_eval/total_samples", counts.shape[0], on_epoch=True, sync_dist=True)
 
             if dist.is_initialized():
                 rank = dist.get_rank()
