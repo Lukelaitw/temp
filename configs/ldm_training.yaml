@@ -34,15 +34,15 @@ training:
       mode: min
       save_top_k: 1
       save_last: true
-      dirpath: ${paths.base_experiment_path}/checkpoints/${experiment_name}
+      dirpath: ${paths.base_output_path}/checkpoints/${experiment_name}
   logger:
     csv:
-      save_dir: ${paths.base_experiment_path}/csv_logger
+      save_dir: ${paths.base_output_path}/csv_logger
       name: ${experiment_name}
     wandb:
       project: scldm_ldm
       entity: scg-vae  # TODO: Change to your wandb entity
-      save_dir: ${paths.base_experiment_path}/wandb_logger
+      save_dir: ${paths.base_output_path}/wandb_logger
 
 model:
   module:

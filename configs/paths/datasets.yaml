@@ -19,8 +19,8 @@ dataset_paths:
     sd_size_factor: ${paths.base_release_path}/resubmission/hlca_log_size_factor_sd.pkl
 
   tabula_muris:
-    train: ${paths.base_data_path}/tabula_muris_train_sharded/adata_0.h5ad # download from CFGen paper https://figshare.com/s/14c2ad9163ae794ae506
-    test: ${paths.base_data_path}/tabula_muris_test_sharded/adata_0.h5ad # download from CFGen paper https://figshare.com/s/14c2ad9163ae794ae506
+    train: ${paths.base_data_path}/tabula_muris_test.h5ad # download from CFGen paper https://figshare.com/s/14c2ad9163ae794ae506
+    test: ${paths.base_data_path}/tabula_muris_train.h5ad # download from CFGen paper https://figshare.com/s/14c2ad9163ae794ae506
     config: ${paths.base_release_path}/resubmission/tabula_muris_negative_binomial.yaml
     ckpt: ${paths.base_release_path}/resubmission/tabula_muris_negative_binomial.ckpt
     mu_size_factor: ${paths.base_release_path}/resubmission/tabula_muris_log_size_factor_mu.pkl

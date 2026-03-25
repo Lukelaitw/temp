@@ -18,7 +18,7 @@ trainer:
   # num_sanity_val_steps: 100
 logger:
   csv:
-    _target_: pytorch_lightning.loggers.csv_logs.CSVLogger
+    _target_: scldm.loggers.CSVLoggerMergeByStep
     save_dir: ${paths.base_output_path}/csv_logger
     name: ${experiment_name}
     version: null
