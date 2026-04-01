@@ -13,6 +13,7 @@ warnings.filterwarnings(
 import hydra
 import pytorch_lightning as pl
 import torch
+from typing import Any
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Trainer
 from pytorch_lightning.strategies import DDPStrategy
@@ -22,19 +23,22 @@ from scldm.logger import logger
 
 os.environ["HYDRA_FULL_ERROR"] = "1"
 
+# PyTorch 2.6 defaults torch.load(weights_only=True), but Lightning checkpoints
+# may contain objects like OmegaConf ListConfig and fail to restore.
+_orig_load = torch.load
+
+
+def _load_weights_only_false(*args: Any, **kwargs: Any) -> Any:
+    kwargs["weights_only"] = False
+    return _orig_load(*args, **kwargs)
+
+
+torch.load = _load_weights_only_false
+
 
 def train(cfg: DictConfig) -> None:
     torch.set_float32_matmul_precision("high")
     pl.seed_everything(cfg.seed)
-
-    # Initialize distributed training
-    if not torch.distributed.is_initialized():
-        if "RANK" not in os.environ:
-            os.environ["RANK"] = "0"
-            os.environ["WORLD_SIZE"] = "1"
-            os.environ["MASTER_ADDR"] = "127.0.0.1"
-            os.environ["MASTER_PORT"] = "29500"
-        torch.distributed.init_process_group(backend="gloo")
 
     # Get world size from environment (set by torchrun/lightning)
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -85,7 +89,7 @@ def train(cfg: DictConfig) -> None:
         strategy=strategy,
         logger=loggers if loggers else False,
         callbacks=callbacks,
-        use_distributed_sampler=False,
+        use_distributed_sampler=True,
     )
 
     # Save config
