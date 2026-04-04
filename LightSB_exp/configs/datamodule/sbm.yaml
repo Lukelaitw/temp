@@ -1,0 +1,94 @@
+# Datamodule config for Schrödinger Bridge Matching.
+#
+# Uses SBMDataModule which loads paired (control, perturbed) cells.
+# Override control_label_key / control_label_value to match your dataset.
+
+datamodule:
+  _target_: scldm.sbm_datamodule.SBMDataModule
+
+  source_adata_path: ${paths.dataset_paths.${datamodule.dataset}.source}
+  train_adata_path: ${paths.dataset_paths.${datamodule.dataset}.train}
+  test_adata_path:  ${paths.dataset_paths.${datamodule.dataset}.test}
+
+  # ---- control / perturbation split ----
+  # Obs column that identifies the perturbation (same as the condition label).
+  control_label_key: gene
+  # Value in that column that marks *unperturbed* / control cells.
+  # Common values: "non-targeting", "control", "CTRL", "safe-targeting".
+  # TODO: Confirm the exact string used in your h5ad obs column.
+  control_label_value: non-targeting
+
+  # Additional obs labels to include in the batch as condition tensors.
+  perturbation_label_keys: [gene, cell_line]
+  # Ordered labels used by SBM condition embeddings (supports 1..K labels).
+  emb_condition_labels: [gene, cell_line]
+
+  vocabulary_encoder: ${datamodule.vocabulary_encoder}
+  adata_attr: ${..dataset_params.${..dataset}.adata_attr}
+  adata_key:  ${..dataset_params.${..dataset}.adata_key}
+
+  batch_size: ${model.batch_size}
+  test_batch_size: ${model.test_batch_size}
+  num_workers: 4
+  seed: 42
+  genes_seq_len: ${..dataset_params.${..dataset}.genes_seq_len}
+  sample_genes:  ${..dataset_params.${..dataset}.sample_genes}
+
+  # Virtual dataset length (steps per epoch = n_samples_per_epoch / batch_size)
+  n_samples_per_epoch: 100000
+  val_fraction: 0.1
+
+vocabulary_encoder:
+  _target_: scldm.encoder.VocabularyEncoderSimplified
+  adata_path: null
+  mask_token: "<MASK>"
+  mask_token_idx: 0
+  n_genes: ${..dataset_params.${..dataset}.n_genes}
+  class_vocab_sizes: ${..dataset_params.${..dataset}.class_vocab_sizes}
+  guidance_weight: ${..dataset_params.${..dataset}.guidance_weight}
+  mu_size_factor: ${..dataset_params.${..dataset}.mu_size_factor}
+  sd_size_factor: ${..dataset_params.${..dataset}.sd_size_factor}
+  condition_strategy: ${..dataset_params.${..dataset}.condition_strategy}
+  metadata_genes: ${..dataset_params.${..dataset}.metadata_genes}
+  metadata_json: ${..dataset_params.${..dataset}.metadata_json}
+
+# Dataset selection (override in sbm_training.yaml)
+dataset: replogle
+
+# Dataset-specific parameters (re-use the same block from default.yaml)
+dataset_params:
+  replogle:
+    n_genes: 2000
+    class_vocab_sizes:
+      cell_line: 4
+      gene: 2023
+    guidance_weight:
+      cell_line: 1.0
+      gene: 1.0
+    genes_seq_len: 2000
+    sample_genes: all
+    mu_size_factor: null
+    sd_size_factor: null
+    adata_attr: X
+    adata_key: null
+    condition_strategy: joint
+    metadata_genes: null
+    metadata_json: ${paths.base_repo_path}/metadata/replogle_train.json
+
+  parse1m:
+    n_genes: 2000
+    class_vocab_sizes:
+      cell_type: 18
+      cytokine: 91
+    guidance_weight:
+      cell_type: 1.0
+      cytokine: 1.0
+    genes_seq_len: 2000
+    sample_genes: all
+    mu_size_factor: null
+    sd_size_factor: null
+    adata_attr: X
+    adata_key: null
+    condition_strategy: joint
+    metadata_genes: null
+    metadata_json: ${paths.base_repo_path}/metadata/parse1m_train.json

@@ -1,0 +1,351 @@
+paths:
+  base_repo_path: ${hydra:runtime.cwd}
+  base_data_path: /projects/p32572/Luke/_artifacts/datasets
+  base_release_path: /projects/p32572/Luke/_artifacts
+  base_experiment_path: experiments/
+  base_output_path: outputs/
+  dataset_paths:
+    dentate_gyrus:
+      train: ${paths.base_data_path}/dentategyrus_train.h5ad
+      test: ${paths.base_data_path}/dentategyrus_test.h5ad
+      config: ${paths.base_release_path}/resubmission/dentate_gyrus_negative_binomial.yaml
+      ckpt: ${paths.base_release_path}/resubmission/dentate_gyrus_negative_binomial.ckpt
+      mu_size_factor: ${paths.base_release_path}/resubmission/dentate_gyrus_log_size_factor_mu.pkl
+      sd_size_factor: ${paths.base_release_path}/resubmission/dentate_gyrus_log_size_factor_sd.pkl
+    hlca:
+      train: /mnt/czi-sci-ai/project-scg-llm-pvc/release/datasets/hlca_train_sharded/adata_0.h5ad
+      test: /mnt/czi-sci-ai/project-scg-llm-pvc/release/datasets/hlca_test_sharded/adata_0.h5ad
+      config: ${paths.base_release_path}/resubmission/hlca_negative_binomial.yaml
+      ckpt: ${paths.base_release_path}/resubmission/hlca_negative_binomial.ckpt
+      mu_size_factor: ${paths.base_release_path}/resubmission/hlca_log_size_factor_mu.pkl
+      sd_size_factor: ${paths.base_release_path}/resubmission/hlca_log_size_factor_sd.pkl
+    tabula_muris:
+      train: ${paths.base_data_path}/tabula_muris_test.h5ad
+      test: ${paths.base_data_path}/tabula_muris_train.h5ad
+      config: ${paths.base_release_path}/resubmission/tabula_muris_negative_binomial.yaml
+      ckpt: ${paths.base_release_path}/resubmission/tabula_muris_negative_binomial.ckpt
+      mu_size_factor: ${paths.base_release_path}/resubmission/tabula_muris_log_size_factor_mu.pkl
+      sd_size_factor: ${paths.base_release_path}/resubmission/tabula_muris_log_size_factor_sd.pkl
+    parse1m:
+      train: /mnt/czi-sci-ai/project-scg-llm-pvc/release/datasets/CD4_Naive_holdout/train.h5ad
+      test: /mnt/czi-sci-ai/project-scg-llm-pvc/release/datasets/CD4_Naive_holdout/test.h5ad
+      config: ${paths.base_release_path}/resubmission/czb_cd4_naive_holdout_negative_binomial.yaml
+      ckpt: ${paths.base_release_path}/resubmission/czb_cd4_naive_holdout_negative_binomial.ckpt
+      mu_size_factor: ${paths.base_release_path}/resubmission/czb_cd4_naive_holdout_log_size_factor_mu.pkl
+      sd_size_factor: ${paths.base_release_path}/resubmission/czb_cd4_naive_holdout_log_size_factor_sd.pkl
+    replogle:
+      train: /mnt/czi-sci-ai/project-scg-llm-pvc/release/datasets/replogle/train_asSTATE_hvg.h5ad
+      test: /mnt/czi-sci-ai/project-scg-llm-pvc/release/datasets/replogle/test_asSTATE_hvg.h5ad
+      config: ${paths.base_release_path}/resubmission/replogle_negative_binomial.yaml
+      ckpt: ${paths.base_release_path}/resubmission/replogle_negative_binomial.ckpt
+      mu_size_factor: ${paths.base_release_path}/resubmission/replogle_log_size_factor_munew.pkl
+      sd_size_factor: ${paths.base_release_path}/resubmission/replogle_log_size_factor_sdnew.pkl
+    homo_sapiens:
+      train: null
+      test: null
+      metadata_genes: ${paths.base_release_path}/vae_census/concatenated_unique_genes.parquet
+      config: ${paths.base_release_path}/vae_census/20M.yaml
+      ckpt: ${paths.base_release_path}/vae_census/20M.ckpt
+model:
+  module:
+    _target_: scldm.models.VAE
+    vae_model:
+      _target_: scldm.vae.TransformerVAE
+      encoder:
+        _target_: scldm.nnets.Encoder
+        n_layer: 2
+        n_inducing_points: 128
+        n_embed: 128
+        n_embed_latent: 16
+        n_head: 4
+        n_head_cross: 1
+        dropout: 0.0
+        bias: false
+        multiple_of: 4
+        layernorm_eps: 1.0e-08
+        norm_layer: layernorm
+        positional_encoding: true
+      decoder:
+        _target_: scldm.nnets.Decoder
+        n_genes: ${datamodule.vocabulary_encoder.n_genes}
+        n_embed: ${model.module.vae_model.encoder.n_embed}
+        n_embed_latent: ${model.module.vae_model.encoder.n_embed_latent}
+        n_head: ${model.module.vae_model.encoder.n_head}
+        n_head_cross: ${model.module.vae_model.encoder.n_head_cross}
+        n_layer: ${model.module.vae_model.encoder.n_layer}
+        n_inducing_points: ${model.module.vae_model.encoder.n_inducing_points}
+        dropout: ${model.module.vae_model.encoder.dropout}
+        bias: ${model.module.vae_model.encoder.bias}
+        multiple_of: ${model.module.vae_model.encoder.multiple_of}
+        layernorm_eps: ${model.module.vae_model.encoder.layernorm_eps}
+        norm_layer: ${model.module.vae_model.encoder.norm_layer}
+        shared_embedding: true
+        use_adaln: false
+      input_layer:
+        _target_: scldm.layers.InputTransformerVAE
+        n_genes: ${datamodule.vocabulary_encoder.n_genes}
+        n_embed: ${model.module.vae_model.encoder.n_embed}
+        agg_func: log1p
+      decoder_head: ${model.decoder_head.${model.decoder_name}}
+    vae_scheduler:
+      _target_: scldm._utils.wsd_schedule
+      num_training_steps: ${training.trainer.max_steps}
+      final_lr_factor: 0.1
+      num_warmup_steps: 481600
+      init_div_factor: 100
+      fract_decay: 0.1
+      decay_type: sqrt
+    vae_optimizer:
+      _target_: scldm.optimizers.AdamWLegacy
+      _partial_: true
+      lr: 0.008
+      weight_decay: 0.0
+      betas:
+      - 0.9
+      - 0.95
+      caution: false
+  decoder_name: negative_binomial_shared_theta
+  decoder_head:
+    negative_binomial:
+      _target_: scldm.stochastic_layers.NegativeBinomialTransformerLayer
+      n_genes: ${datamodule.vocabulary_encoder.n_genes}
+      shared_theta: true
+      n_embed: ${model.module.vae_model.encoder.n_embed}
+      norm_layer: ${model.module.vae_model.encoder.norm_layer}
+      layernorm_eps: ${model.module.vae_model.encoder.layernorm_eps}
+    negative_binomial_shared_theta:
+      _target_: scldm.stochastic_layers.NegativeBinomialTransformerLayer
+      n_genes: 2000
+      shared_theta: true
+      n_embed: 128
+      norm_layer: layernorm
+      layernorm_eps: 1.0e-08
+    negative_binomial_unshared_theta:
+      _target_: scldm.stochastic_layers.NegativeBinomialTransformerLayer
+      n_genes: ${datamodule.vocabulary_encoder.n_genes}
+      shared_theta: false
+      n_embed: ${model.module.vae_model.encoder.n_embed}
+      norm_layer: ${model.module.vae_model.encoder.norm_layer}
+      layernorm_eps: ${model.module.vae_model.encoder.layernorm_eps}
+    gaussian:
+      _target_: scldm.stochastic_layers.GaussianTransformerLayer
+      n_embed: ${model.module.vae_model.encoder.n_embed}
+      norm_layer: ${model.module.vae_model.encoder.norm_layer}
+      layernorm_eps: ${model.module.vae_model.encoder.layernorm_eps}
+  batch_size: 128
+  test_batch_size: 128
+  num_parameters: null
+  flops: null
+  get_flops:
+    _target_: scldm.flops.get_flops
+    seq_len: ${model.module.vae_model.input_layer.n_genes}
+    vocab_size: ${model.module.vae_model.input_layer.n_genes}
+    num_heads: ${model.module.vae_model.encoder.n_head}
+    swiglu: false
+    n_layers: ${eval:'${model.module.vae_model.encoder.n_layer}*2'}
+    d_model: ${model.module.vae_model.encoder.n_embed}
+    key_size: ${model.module.vae_model.encoder.n_embed}
+    ffw_size: ${eval:'${model.module.vae_model.encoder.n_embed} * ${model.module.vae_model.encoder.multiple_of}'}
+training:
+  trainer:
+    _target_: pytorch_lightning.Trainer
+    _partial_: true
+    max_steps: 4816000
+    enable_progress_bar: true
+    precision: 32
+    log_every_n_steps: 30
+    val_check_interval: null
+    limit_val_batches: null
+    check_val_every_n_epoch: 5
+    sync_batchnorm: true
+    accelerator: gpu
+    enable_checkpointing: true
+    deterministic: false
+    gradient_clip_val: 10.0
+    gradient_clip_algorithm: norm
+    accumulate_grad_batches: 1
+  profiler: null
+  logger:
+    csv:
+      _target_: scldm.loggers.CSVLoggerMergeByStep
+      save_dir: ${paths.base_output_path}/csv_logger
+      name: ${experiment_name}
+      version: null
+      prefix: ''
+    wandb:
+      _target_: pytorch_lightning.loggers.wandb.WandbLogger
+      _partial_: true
+      save_dir: ${paths.base_output_path}/wandb_logger
+      project: scldm_vae
+      entity: scg-vae
+      name: null
+      job_type: sweep
+      id: null
+      resume: allow
+      resume_from: null
+  callbacks:
+    lr_monitor:
+      _target_: pytorch_lightning.callbacks.LearningRateMonitor
+      logging_interval: step
+      log_weight_decay: true
+    model_checkpoints:
+      _target_: pytorch_lightning.callbacks.ModelCheckpoint
+      dirpath: ${paths.base_output_path}/checkpoints/${experiment_name}
+      filename: '{epoch}'
+      save_weights_only: false
+      save_on_train_epoch_end: false
+      save_top_k: 3
+      monitor: val_loss
+      mode: min
+      enable_version_counter: false
+      save_last: true
+  num_epochs: 1000
+datamodule:
+  datamodule:
+    _target_: scldm.datamodule.DataModule
+    train_adata_path: /projects/p32572/Luke/datasets/replogle/replogle_train_hvg.h5ad
+    test_adata_path: /projects/p32572/Luke/datasets/replogle/replogle_test_hvg.h5ad
+    adata_attr: ${..dataset_params.${..dataset}.adata_attr}
+    adata_key: ${..dataset_params.${..dataset}.adata_key}
+    vocabulary_encoder: ${datamodule.vocabulary_encoder}
+    allow_missing_train: false
+    batch_size: ${model.batch_size}
+    test_batch_size: ${model.test_batch_size}
+    num_workers: 0
+    seed: 42
+    prefetch_factor: 8
+    persistent_workers: true
+    drop_last_indices: true
+    drop_incomplete_batch: true
+    sample_genes: expressed
+    genes_seq_len: ${..dataset_params.${..dataset}.genes_seq_len}
+    val_as_test: false
+  vocabulary_encoder:
+    _target_: scldm.encoder.VocabularyEncoderSimplified
+    adata_path: null
+    mask_token: <MASK>
+    mask_token_idx: 0
+    n_genes: 2000
+    class_vocab_sizes:
+      cell_line: 4
+      gene: 2024
+    guidance_weight:
+      cell_line: 1.0
+      gene: 1.0
+    mu_size_factor: /projects/p32572/Luke/_artifacts/resubmission/replogle_log_size_factor_munew.pkl
+    sd_size_factor: /projects/p32572/Luke/_artifacts/resubmission/replogle_log_size_factor_sdnew.pkl
+    condition_strategy: joint
+    metadata_genes: null
+    metadata_json: /gpfs/projects/p32572/Luke/metadata/replogle_train.json
+  dataset: replogle
+  dataset_params:
+    dentate_gyrus:
+      n_genes: 17002
+      class_vocab_sizes:
+        clusters: 14
+      guidance_weight:
+        clusters: 1.0
+      genes_seq_len: 6147
+      sample_genes: expressed
+      mu_size_factor: ${paths.base_release_path}/resubmission/dentate_gyrus_log_size_factor_mu.pkl
+      sd_size_factor: ${paths.base_release_path}/resubmission/dentate_gyrus_log_size_factor_sd.pkl
+      adata_attr: X
+      adata_key: null
+      condition_strategy: mutually_exclusive
+      metadata_genes: null
+      metadata_json: ${paths.base_repo_path}/metadata/dentategyrus_train.json
+    hlca:
+      n_genes: 27997
+      class_vocab_sizes:
+        cell_type: 50
+      guidance_weight:
+        cell_type: 1.0
+      genes_seq_len: 10186
+      sample_genes: expressed
+      mu_size_factor: ${paths.base_release_path}/resubmission/hlca_log_size_factor_mu.pkl
+      sd_size_factor: ${paths.base_release_path}/resubmission/hlca_log_size_factor_sd.pkl
+      adata_attr: layers
+      adata_key: X_counts
+      condition_strategy: mutually_exclusive
+      metadata_genes: null
+      metadata_json: ${paths.base_repo_path}/metadata/hlca_train.json
+    tabula_muris:
+      n_genes: 19734
+      class_vocab_sizes:
+        tissue: 16
+      guidance_weight:
+        tissue: 1.0
+      genes_seq_len: 9059
+      sample_genes: expressed
+      mu_size_factor: ${paths.base_release_path}/resubmission/tabula_muris_log_size_factor_mu.pkl
+      sd_size_factor: ${paths.base_release_path}/resubmission/tabula_muris_log_size_factor_sd.pkl
+      adata_attr: layers
+      adata_key: X_counts
+      condition_strategy: mutually_exclusive
+      metadata_genes: null
+      metadata_json: ${paths.base_repo_path}/metadata/tabula_muris_train.json
+    parse1m:
+      n_genes: 2000
+      class_vocab_sizes:
+        cell_type: 18
+        cytokine: 91
+      guidance_weight:
+        cell_type: 1.0
+        cytokine: 1.0
+      genes_seq_len: 2000
+      sample_genes: all
+      mu_size_factor: ${paths.base_release_path}/resubmission/czb_cd4_naive_holdout_log_size_factor_mu.pkl
+      sd_size_factor: ${paths.base_release_path}/resubmission/czb_cd4_naive_holdout_log_size_factor_sd.pkl
+      adata_attr: X
+      adata_key: null
+      condition_strategy: joint
+      metadata_genes: null
+      metadata_json: ${paths.base_repo_path}/metadata/parse1m_train.json
+    czb_cd4_naive_holdout:
+      n_genes: 2000
+      class_vocab_sizes:
+        cell_type: 18
+        cytokine: 91
+      guidance_weight:
+        cell_type: 1.0
+        cytokine: 1.0
+      genes_seq_len: 2000
+      sample_genes: expressed
+      mu_size_factor: ${paths.base_release_path}/resubmission/czb_cd4_naive_holdout_log_size_factor_mu.pkl
+      sd_size_factor: ${paths.base_release_path}/resubmission/czb_cd4_naive_holdout_log_size_factor_sd.pkl
+      adata_attr: X
+      adata_key: null
+      condition_strategy: joint
+      metadata_genes: null
+      metadata_json: ${paths.base_repo_path}/metadata/parse1m_train.json
+    replogle:
+      n_genes: 2000
+      class_vocab_sizes:
+        cell_line: 4
+        gene: 2024
+      guidance_weight:
+        cell_line: 1.0
+        gene: 1.0
+      genes_seq_len: 2000
+      sample_genes: all
+      mu_size_factor: ${paths.base_release_path}/resubmission/replogle_log_size_factor_munew.pkl
+      sd_size_factor: ${paths.base_release_path}/resubmission/replogle_log_size_factor_sdnew.pkl
+      adata_attr: X
+      adata_key: null
+      condition_strategy: joint
+      metadata_genes: null
+      metadata_json: ${paths.base_repo_path}/metadata/replogle_train.json
+    homo_sapiens:
+      n_genes: 36130
+      class_vocab_sizes: null
+      guidance_weight: null
+      genes_seq_len: 8000
+      mu_size_factor: null
+      sd_size_factor: null
+      adata_attr: X
+      adata_key: null
+      condition_strategy: mutually_exclusive
+      metadata_genes: ${paths.dataset_paths.${datamodule.dataset}.metadata_genes}
+      metadata_json: ${paths.base_repo_path}/metadata/census_genes.json
+seed: 12345
+experiment_name: replogle_vae_2

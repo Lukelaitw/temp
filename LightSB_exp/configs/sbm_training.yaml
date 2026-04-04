@@ -1,0 +1,106 @@
+# @package _global_
+#
+# Top-level training config for Schrödinger Bridge Matching (SBM).
+#
+# Usage:
+#   python src/train_sbm.py \
+#       paths.base_data_path=/path/to/data \
+#       experiment_name=sbm_replogle
+#
+# Key things to configure before running:
+#   1. paths.base_data_path        — directory containing the .h5ad files
+#   2. model.module.vae_as_tokenizer.load_from_checkpoint
+#                                  — point to a trained VAE checkpoint
+#   3. datamodule.datamodule.control_label_value
+#                                  — confirm the string used for control cells
+#   4. model.module.sbm_model.condition_vocab_sizes
+#                                  — must match selected condition labels
+
+defaults:
+  - paths: datasets
+  - model: sbm_base
+  - training: default
+  - datamodule: sbm
+  - _self_
+
+paths:
+  # TODO: Change to your local data directory
+  base_data_path: /path/to/data
+
+seed: 42
+experiment_name: sbm_replogle
+
+# ---- Dataset / datamodule overrides ----
+datamodule:
+  dataset: replogle
+
+  # Control cell identification — adjust to match your h5ad obs column
+  datamodule:
+    control_label_key: gene
+    # Typical Replogle control label. Confirm with:
+    #   import anndata as ad; a = ad.read_h5ad('train.h5ad')
+    #   print(a.obs['gene'].unique())
+    control_label_value: non-targeting
+    n_samples_per_epoch: 200000
+    batch_size: ${model.batch_size}
+    test_batch_size: ${model.test_batch_size}
+
+# ---- Model overrides ----
+model:
+  batch_size: 128
+  test_batch_size: 128
+
+  module:
+    # Frozen VAE checkpoint (trained separately with train_vae.py / train_ldm.py)
+    vae_as_tokenizer:
+      train: false
+      load_from_checkpoint:
+        # TODO: Set these paths to point to your trained VAE
+        ckpt_path: /path/to/checkpoints
+        job_name: vae_replogle
+        epoch: null   # null → last.ckpt
+
+    # ConditionedLightSBM dimensions.
+    # dim = VAE encoder n_inducing_points * n_embed_latent (default 16*16=256)
+    sbm_model:
+      dim: 256
+      n_potentials: 32
+      condition_label_order: [gene, cell_line]
+      condition_vocab_sizes:
+        gene: 2023
+        cell_line: 4
+      cond_embed_dim: 64
+      cond_hidden_dim: 128
+      epsilon: 1.0
+      sampling_batch_size: 64
+
+    safe_t: 0.01
+    epsilon: 1.0
+    euler_maruyama_steps: 100
+
+# ---- Training schedule ----
+training:
+  num_epochs: 200
+  trainer:
+    max_steps: 100000
+    enable_progress_bar: true
+    check_val_every_n_epoch: 10
+    gradient_clip_val: 5.0
+    # ConditionedLightSBM.get_drift uses autograd.grad; Lightning's default
+    # torch.inference_mode during val would break validation loss.
+    inference_mode: false
+  callbacks:
+    model_checkpoints:
+      monitor: val_loss
+      mode: min
+      save_top_k: 3
+      save_last: true
+      dirpath: ${paths.base_output_path}/checkpoints/${experiment_name}
+  logger:
+    csv:
+      save_dir: ${paths.base_output_path}/csv_logger
+      name: ${experiment_name}
+    wandb:
+      project: scldm_sbm
+      entity: scg-vae   # TODO: Change to your wandb entity
+      save_dir: ${paths.base_output_path}/wandb_logger
