@@ -3,12 +3,12 @@ export WANDB_MODE=offline
 
 # sbm.yaml 從 paths.dataset_paths.replogle 讀取 source（control/P0）與 train、test。
 # base_repo_path 只影響預設路徑；若檔案不在 ${base_repo_path}/datasets/replogle/ 下，務必覆寫這三行。
-srun /gpfs/projects/p32572/Luke/.venv/bin/python src/train_sbm.py \
+srun /gpfs/projects/p32572/Luke/.venv/bin/python src/train_sbm.py \ # modify the path
   --config-name sbm_training \
-  paths.base_repo_path=LSBM_exp/ \
-  paths.base_data_path=LSBM_exp/data \
-  paths.base_release_path=LSBM_exp/ \
-  paths.base_output_path=LSBM_exp/outputs \
+  paths.base_repo_path=./ \
+  paths.base_data_path=./data \
+  paths.base_release_path=./ \
+  paths.base_output_path=./outputs \
   paths.dataset_paths.replogle.source=./data/replogle/replogle_source.h5ad \
   paths.dataset_paths.replogle.train=./data/replogle/replogle_train.h5ad \
   paths.dataset_paths.replogle.test=./data/replogle/replogle_test.h5ad \
